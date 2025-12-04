@@ -1,5 +1,8 @@
-# NeoHide - Конфигурация скрытия команд и защиты прав
+# NeoHide v1.1.0 Configuration
+# ============================
+# Database & Web Interface Update
 
+# === Основные настройки ===
 hide-commands:
   enabled: true
   hide-from-tab: true
@@ -14,7 +17,31 @@ logging:
   console: true
   file: true
 
-# Список команд для скрытия
+# === Настройки базы данных ===
+database:
+  # Доступные типы: SQLITE, MYSQL, H2
+  type: "SQLITE"
+
+  # Настройки MySQL (используются только если type: MYSQL)
+  mysql:
+    host: "localhost"
+    port: 3306
+    database: "neohide"
+    username: "root"
+    password: ""
+
+# === Веб-интерфейс ===
+web:
+  # Включить веб-интерфейс (localhost:8080)
+  enabled: false
+
+  # Порт для веб-сервера
+  port: 8080
+
+  # Токен для авторизации (ИЗМЕНИТЕ ЭТОТ ТОКЕН!)
+  auth-token: "neohide-secret-token-change-me-please"
+
+# === Список скрытых команд ===
 hidden-commands:
   - "plugin"
   - "pl"
@@ -33,16 +60,25 @@ hidden-commands:
   - "perm"
   - "permission"
   - "permissionsex"
+  - "gm"
+  - "gamemode"
+  - "give"
+  - "i"
+  - "item"
+  - "ban"
+  - "kick"
+  - "whitelist"
+  - "wl"
 
-# Защищенные права (нельзя получить даже через плагины прав)
+# === Защищенные права ===
+# Права, которые нельзя получить даже через плагины прав
 protected-permissions:
   - "*"
   - "bukkit.*"
   - "minecraft.*"
-  - "neohide.reload"
-  - "neohide.manage"
+  - "neohide.*"
 
-# Фейковые ответы на скрытые команды
+# === Фейковые ответы на скрытые команды ===
 fake-aliases:
   plugin: "§cНеизвестная команда. Напишите /help для помощи."
   pl: "§cНеизвестная команда. Напишите /help для помощи."

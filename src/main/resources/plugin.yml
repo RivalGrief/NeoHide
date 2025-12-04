@@ -1,15 +1,15 @@
 name: NeoHide
-version: 1.0.0
+version: 1.1.0
 main: com.neohide.neohide.NeoHide
 api-version: "1.16"
 authors: NeoStudio
-description: Advanced command hiding and permission protection
-website: https://github.com/yourname/NeoHide
+description: Advanced command hiding and permission protection with web interface
+website: https://github.com/RivalGrief/NeoHide
 
 commands:
   neohide:
     description: Main command for NeoHide
-    usage: /<command> [help|reload|status|hide|unhide|list|protect]
+    usage: /<command> [help|reload|status|hide|unhide|list|protect|vanish|spy|cmdspy|web]
     permission: neohide.use
     aliases: [nh, hide]
 
@@ -31,4 +31,25 @@ permissions:
     default: op
   neohide.bypass:
     description: Bypass command hiding
+    default: op
+  neohide.vanish:
+    description: Allows using vanish
+    default: op
+  neohide.vanish.see:
+    description: Can see vanished players
+    default: op
+  neohide.hide:
+    description: Allows hiding from other players
+    default: op
+  neohide.hide.see:
+    description: Can see hidden players
+    default: op
+  neohide.spy:
+    description: Allows spying on players
+    default: op
+  neohide.spy.commands:
+    description: Allows spying on commands
+    default: op
+  neohide.web:
+    description: Access web interface
     default: op
