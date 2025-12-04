@@ -2,9 +2,7 @@ name: NeoHide
 version: 1.1.0
 main: com.neohide.neohide.NeoHide
 api-version: "1.16"
-authors: NeoStudio
-description: Advanced command hiding and permission protection with web interface
-website: https://github.com/RivalGrief/NeoHide
+author: NeoStudio
 
 commands:
   neohide:
