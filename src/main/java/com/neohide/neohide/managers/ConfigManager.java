@@ -300,11 +300,13 @@ public class ConfigManager {
     }
 
     public String getWebStatus() {
+        // Проверяем, был ли токен изменен с дефолтного
+        boolean isDefaultToken = webAuthToken.equals("neohide-secret-token-change-me");
+
         return String.format("Веб-интерфейс: %s, Порт: %d, Токен: %s",
                 webEnabled ? "Включен" : "Выключен",
                 webPort,
-                webAuthToken.equals("neohide-secret-token-change-me") ?
-                        "НЕ ИЗМЕНЕН (опасно!)" : "Установлен");
+                isDefaultToken ? "НЕ ИЗМЕНЕН (опасно!)" : "Установлен (смотрите в консоли)");
     }
 
     public Map<String, Object> getConfigSummary() {
@@ -317,7 +319,54 @@ public class ConfigManager {
         summary.put("hidden_commands_count", hiddenCommands.size());
         summary.put("protected_permissions_count", protectedPermissions.size());
         summary.put("database_type", databaseType);
+        summary.put("web_token_changed", !webAuthToken.equals("neohide-secret-token-change-me"));
 
         return summary;
+    }
+
+    // ========== МЕТОДЫ ДЛЯ ВЕБ-ИНТЕРФЕЙСА ==========
+
+    /**
+     * Получить информацию о конфигурации для веб-интерфейса
+     */
+    public Map<String, Object> getWebConfigInfo() {
+        Map<String, Object> info = new HashMap<>();
+        info.put("enabled", webEnabled);
+        info.put("port", webPort);
+        info.put("token_set", !webAuthToken.equals("neohide-secret-token-change-me"));
+        info.put("token_length", webAuthToken.length());
+        info.put("last_modified", new File(plugin.getDataFolder(), "config.yml").lastModified());
+        return info;
+    }
+
+    /**
+     * Проверить валидность токена
+     */
+    public boolean validateWebToken(String token) {
+        return webAuthToken.equals(token);
+    }
+
+    /**
+     * Получить текущую конфигурацию в виде Map
+     */
+    public Map<String, Object> getConfigMap() {
+        Map<String, Object> configMap = new HashMap<>();
+
+        // Основные настройки
+        configMap.put("hide_commands_enabled", hideCommandsEnabled);
+        configMap.put("permission_protection_enabled", permissionProtectionEnabled);
+        configMap.put("op_protection_enabled", opProtectionEnabled);
+        configMap.put("web_enabled", webEnabled);
+        configMap.put("web_port", webPort);
+
+        // Списки
+        configMap.put("hidden_commands", new ArrayList<>(hiddenCommands));
+        configMap.put("protected_permissions", new ArrayList<>(protectedPermissions));
+        configMap.put("fake_aliases", new HashMap<>(fakeAliases));
+
+        // Информация о токене (без самого токена из соображений безопасности)
+        configMap.put("has_token", !webAuthToken.equals("neohide-secret-token-change-me"));
+
+        return configMap;
     }
 }

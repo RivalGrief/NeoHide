@@ -13,6 +13,9 @@ commands:
     aliases: [nh, hide]
 
 permissions:
+  neohide.token:
+    description: Позволяет просматривать и генерировать токены веб-интерфейса
+    default: op
   neohide.use:
     description: Allows using NeoHide commands
     default: op

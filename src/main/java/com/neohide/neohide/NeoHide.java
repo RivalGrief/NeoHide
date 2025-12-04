@@ -8,6 +8,8 @@ import com.neohide.neohide.tabcompleters.*;
 import com.neohide.neohide.protection.*;
 import com.neohide.neohide.managers.WebServerManager;
 
+import java.security.SecureRandom;
+import java.util.Base64;
 import java.util.logging.Level;
 
 public class NeoHide extends JavaPlugin {
@@ -34,6 +36,9 @@ public class NeoHide extends JavaPlugin {
         // Загрузка конфигурации
         configManager.loadConfig();
 
+        // 🔥 ГЕНЕРАЦИЯ ТОКЕНА ТОЛЬКО ПРИ ПЕРВОМ ЗАПУСКЕ 🔥
+        generateTokenIfNeeded();
+
         // Подключение к БД
         databaseManager.connect();
 
@@ -59,6 +64,22 @@ public class NeoHide extends JavaPlugin {
         if (configManager.isWebEnabled()) {
             this.webServerManager = new WebServerManager(this);
             webServerManager.start();
+
+            String token = configManager.getWebAuthToken();
+            boolean isDefaultToken = token.equals("neohide-secret-token-change-me");
+
+            getLogger().info("════════════════════════════════════════");
+            getLogger().info("🌐 Веб-интерфейс NeoHide запущен!");
+            getLogger().info("📌 Адрес: http://localhost:" + configManager.getWebPort());
+
+            if (isDefaultToken) {
+                getLogger().warning("⚠️  ВНИМАНИЕ: Используется дефолтный токен!");
+                getLogger().warning("⚠️  Измените 'web.auth-token' в config.yml для безопасности!");
+            } else {
+                getLogger().info("🔑 Токен доступа установлен");
+                getLogger().info("📋 Команда для просмотра токена: /neohide token");
+            }
+            getLogger().info("════════════════════════════════════════");
         }
 
         getLogger().info("NeoHide v" + getDescription().getVersion() + " успешно запущен!");
@@ -67,6 +88,49 @@ public class NeoHide extends JavaPlugin {
         getLogger().info("База данных: " + (databaseManager.isConnected() ? "Подключена" : "Ошибка"));
         if (configManager.isWebEnabled()) {
             getLogger().info("Веб-интерфейс: http://localhost:" + configManager.getWebPort());
+        }
+    }
+
+    /**
+     * Генерирует токен только если используется дефолтный
+     */
+    private void generateTokenIfNeeded() {
+        String currentToken = configManager.getWebAuthToken();
+
+        // Проверяем, дефолтный ли токен
+        if (currentToken.equals("neohide-secret-token-change-me")) {
+            try {
+                SecureRandom secureRandom = new SecureRandom();
+                byte[] randomBytes = new byte[32];
+                secureRandom.nextBytes(randomBytes);
+
+                String newToken = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+                configManager.setWebAuthToken(newToken);
+
+                getLogger().info("✅ Сгенерирован новый токен для веб-интерфейса");
+                getLogger().info("🔑 Токен сохранён в config.yml");
+            } catch (Exception e) {
+                getLogger().log(Level.WARNING, "Не удалось сгенерировать токен", e);
+            }
+        }
+    }
+
+    /**
+     * Генерирует новый токен по команде
+     */
+    public String generateNewToken() {
+        try {
+            SecureRandom secureRandom = new SecureRandom();
+            byte[] randomBytes = new byte[32];
+            secureRandom.nextBytes(randomBytes);
+
+            String newToken = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+            configManager.setWebAuthToken(newToken);
+
+            return newToken;
+        } catch (Exception e) {
+            getLogger().log(Level.WARNING, "Не удалось сгенерировать токен", e);
+            return null;
         }
     }
 
