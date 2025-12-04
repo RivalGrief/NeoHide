@@ -43,4 +43,4 @@ cd NeoHide
 mvn clean package
 
 # Готовый плагин будет в:
-# target/NeoHide-1.0.0.jar
+# target/NeoHide-1.1.0.jar
