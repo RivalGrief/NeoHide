@@ -4,13 +4,17 @@ import com.neohide.neohide.NeoHide;
 import com.neohide.neohide.managers.ConfigManager;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintWriter;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.logging.Level;
 
 public class WebServerManager {
 
     private final NeoHide plugin;
+    private com.sun.net.httpserver.HttpServer server;
     private boolean running = false;
 
     public WebServerManager(NeoHide plugin) {
@@ -28,8 +32,8 @@ public class WebServerManager {
         int port = config.getWebPort();
 
         try {
-            // Создаем простой HTTP сервер
-            com.sun.net.httpserver.HttpServer server = com.sun.net.httpserver.HttpServer.create(
+            // Создаем HTTP сервер
+            server = com.sun.net.httpserver.HttpServer.create(
                     new java.net.InetSocketAddress(port), 0
             );
 
@@ -52,6 +56,9 @@ public class WebServerManager {
     }
 
     public void stop() {
+        if (server != null) {
+            server.stop(0);
+        }
         running = false;
         plugin.getLogger().info("Веб-интерфейс остановлен");
     }
@@ -70,7 +77,7 @@ public class WebServerManager {
             // Проверка авторизации
             String token = exchange.getRequestHeaders().getFirst("X-Auth-Token");
             if (token == null || !token.equals(authToken)) {
-                sendError(exchange, 401, "Unauthorized");
+                sendError(exchange, 401, "Неавторизованный доступ");
                 return;
             }
 
@@ -78,20 +85,21 @@ public class WebServerManager {
             String path = exchange.getRequestURI().getPath();
 
             try {
-                if (method.equals("GET")) {
+                if ("GET".equals(method)) {
                     handleGet(exchange, path);
-                } else if (method.equals("POST")) {
+                } else if ("POST".equals(method)) {
                     handlePost(exchange, path);
                 } else {
-                    sendError(exchange, 405, "Method not allowed");
+                    sendError(exchange, 405, "Метод не поддерживается");
                 }
             } catch (Exception e) {
-                sendError(exchange, 500, "Internal server error: " + e.getMessage());
+                sendError(exchange, 500, "Внутренняя ошибка сервера: " + e.getMessage());
+                plugin.getLogger().log(Level.WARNING, "Ошибка API: " + e.getMessage(), e);
             }
         }
 
         private void handleGet(com.sun.net.httpserver.HttpExchange exchange, String path) throws IOException {
-            if (path.equals("/api/stats")) {
+            if ("/api/stats".equals(path)) {
                 // Статистика
                 Map<String, Object> stats = new HashMap<>();
                 stats.put("hidden_commands", plugin.getCommandManager().getHiddenCommands().size());
@@ -100,12 +108,12 @@ public class WebServerManager {
 
                 sendJson(exchange, stats);
 
-            } else if (path.equals("/api/commands")) {
+            } else if ("/api/commands".equals(path)) {
                 // Скрытые команды
                 List<String> commands = plugin.getCommandManager().getHiddenCommands();
                 sendJson(exchange, commands);
 
-            } else if (path.equals("/api/status")) {
+            } else if ("/api/status".equals(path)) {
                 // Статус плагина
                 ConfigManager config = plugin.getConfigManager();
                 Map<String, Object> status = new HashMap<>();
@@ -113,56 +121,63 @@ public class WebServerManager {
                 status.put("version", plugin.getDescription().getVersion());
                 status.put("protection_enabled", config.isHideCommandsEnabled());
                 status.put("web_enabled", config.isWebEnabled());
+                status.put("database_connected", plugin.getDatabaseManager().isConnected());
 
                 sendJson(exchange, status);
 
             } else {
-                sendError(exchange, 404, "Endpoint not found");
+                sendError(exchange, 404, "Эндпоинт не найден");
             }
         }
 
         private void handlePost(com.sun.net.httpserver.HttpExchange exchange, String path) throws IOException {
-            String query = exchange.getRequestURI().getQuery();
-            Map<String, String> params = parseQuery(query);
+            // Читаем тело запроса
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            Map<String, String> params = parseQuery(body);
 
-            if (path.equals("/api/hide")) {
+            if ("/api/hide".equals(path)) {
                 String command = params.get("command");
                 if (command != null && !command.isEmpty()) {
                     plugin.getCommandManager().addHiddenCommand(command);
-                    sendSuccess(exchange, "Command hidden: " + command);
+                    sendSuccess(exchange, "Команда скрыта: " + command);
                 } else {
-                    sendError(exchange, 400, "Command parameter required");
+                    sendError(exchange, 400, "Требуется параметр command");
                 }
 
-            } else if (path.equals("/api/unhide")) {
+            } else if ("/api/unhide".equals(path)) {
                 String command = params.get("command");
                 if (command != null && !command.isEmpty()) {
                     plugin.getCommandManager().removeHiddenCommand(command);
-                    sendSuccess(exchange, "Command unhidden: " + command);
+                    sendSuccess(exchange, "Команда показана: " + command);
                 } else {
-                    sendError(exchange, 400, "Command parameter required");
+                    sendError(exchange, 400, "Требуется параметр command");
                 }
 
-            } else if (path.equals("/api/toggle")) {
-                boolean enabled = "true".equals(params.get("enabled"));
-                plugin.getConfigManager().setHideCommandsEnabled(enabled);
-                sendSuccess(exchange, "Protection " + (enabled ? "enabled" : "disabled"));
+            } else if ("/api/toggle".equals(path)) {
+                String enabledStr = params.get("enabled");
+                if (enabledStr != null) {
+                    boolean enabled = "true".equalsIgnoreCase(enabledStr);
+                    plugin.getConfigManager().setHideCommandsEnabled(enabled);
+                    sendSuccess(exchange, "Защита " + (enabled ? "включена" : "выключена"));
+                } else {
+                    sendError(exchange, 400, "Требуется параметр enabled");
+                }
 
             } else {
-                sendError(exchange, 404, "Endpoint not found");
+                sendError(exchange, 404, "Эндпоинт не найден");
             }
         }
 
         private Map<String, String> parseQuery(String query) {
             Map<String, String> result = new HashMap<>();
-            if (query == null) return result;
+            if (query == null || query.isEmpty()) return result;
 
             String[] pairs = query.split("&");
             for (String pair : pairs) {
                 int idx = pair.indexOf("=");
                 if (idx > 0) {
-                    String key = java.net.URLDecoder.decode(pair.substring(6, idx), java.nio.charset.StandardCharsets.UTF_8);
-                    String value = java.net.URLDecoder.decode(pair.substring(idx + 1), java.nio.charset.StandardCharsets.UTF_8);
+                    String key = URLDecoder.decode(pair.substring(0, idx), StandardCharsets.UTF_8);
+                    String value = URLDecoder.decode(pair.substring(idx + 1), StandardCharsets.UTF_8);
                     result.put(key, value);
                 }
             }
@@ -179,15 +194,16 @@ public class WebServerManager {
                     json = listToJson((List<?>) data);
                 }
             } catch (Exception e) {
-                json = "{\"error\":\"JSON serialization error\"}";
+                json = "{\"error\":\"Ошибка сериализации JSON\"}";
             }
 
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            byte[] responseBytes = json.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
             exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
-            exchange.sendResponseHeaders(200, json.getBytes().length);
+            exchange.sendResponseHeaders(200, responseBytes.length);
 
-            try (PrintWriter out = new PrintWriter(exchange.getResponseBody())) {
-                out.print(json);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(responseBytes);
             }
         }
 
@@ -228,6 +244,7 @@ public class WebServerManager {
         }
 
         private String escapeJson(String str) {
+            if (str == null) return "";
             return str.replace("\\", "\\\\")
                     .replace("\"", "\\\"")
                     .replace("\n", "\\n")
@@ -249,11 +266,12 @@ public class WebServerManager {
             error.put("message", message);
 
             String json = mapToJson(error);
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(code, json.getBytes().length);
+            byte[] responseBytes = json.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json; charset=UTF-8");
+            exchange.sendResponseHeaders(code, responseBytes.length);
 
-            try (PrintWriter out = new PrintWriter(exchange.getResponseBody())) {
-                out.print(json);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(responseBytes);
             }
         }
     }
@@ -264,124 +282,252 @@ public class WebServerManager {
         public void handle(com.sun.net.httpserver.HttpExchange exchange) throws IOException {
             String path = exchange.getRequestURI().getPath();
 
-            if (path.equals("/") || path.equals("/index.html")) {
+            if ("/".equals(path) || "/index.html".equals(path)) {
                 serveIndex(exchange);
+            } else if ("/style.css".equals(path)) {
+                serveCss(exchange);
             } else {
-                sendError(exchange, 404, "File not found");
+                sendError(exchange, 404, "Файл не найден");
             }
         }
 
         private void serveIndex(com.sun.net.httpserver.HttpExchange exchange) throws IOException {
             String html = "<!DOCTYPE html>\n" +
-                    "<html>\n" +
+                    "<html lang='ru'>\n" +
                     "<head>\n" +
-                    "    <title>NeoHide Dashboard</title>\n" +
+                    "    <meta charset='UTF-8'>\n" +
+                    "    <meta name='viewport' content='width=device-width, initial-scale=1.0'>\n" +
+                    "    <title>NeoHide - Панель управления</title>\n" +
                     "    <style>\n" +
-                    "        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }\n" +
-                    "        .container { max-width: 1200px; margin: 0 auto; }\n" +
-                    "        .header { background: #333; color: white; padding: 20px; border-radius: 5px; }\n" +
-                    "        .stats { display: flex; gap: 20px; margin: 20px 0; }\n" +
-                    "        .stat-card { flex: 1; background: white; padding: 20px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }\n" +
-                    "        .stat-card h3 { margin: 0 0 10px 0; color: #333; }\n" +
-                    "        .stat-card .value { font-size: 24px; font-weight: bold; color: #4CAF50; }\n" +
-                    "        .control-panel { background: white; padding: 20px; border-radius: 5px; margin: 20px 0; }\n" +
-                    "        .command-input { display: flex; gap: 10px; margin: 10px 0; }\n" +
-                    "        input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 3px; }\n" +
-                    "        button { padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer; }\n" +
-                    "        button:hover { background: #45a049; }\n" +
-                    "        .command-list { background: white; padding: 20px; border-radius: 5px; }\n" +
-                    "        .command-item { padding: 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }\n" +
-                    "        .auth-panel { background: #ffebee; padding: 20px; border-radius: 5px; margin: 20px 0; }\n" +
+                    "        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: #333; }\n" +
+                    "        .container { max-width: 1200px; margin: 0 auto; background: rgba(255, 255, 255, 0.95); border-radius: 15px; padding: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }\n" +
+                    "        .header { text-align: center; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 2px solid #667eea; }\n" +
+                    "        .header h1 { color: #667eea; margin: 0; font-size: 2.5em; }\n" +
+                    "        .header p { color: #666; font-size: 1.1em; }\n" +
+                    "        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }\n" +
+                    "        .stat-card { background: white; padding: 25px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); transition: transform 0.3s, box-shadow 0.3s; }\n" +
+                    "        .stat-card:hover { transform: translateY(-5px); box-shadow: 0 10px 25px rgba(0,0,0,0.15); }\n" +
+                    "        .stat-card h3 { margin-top: 0; color: #555; font-size: 1.2em; }\n" +
+                    "        .stat-value { font-size: 2.5em; font-weight: bold; color: #667eea; margin: 10px 0; }\n" +
+                    "        .control-panel { background: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }\n" +
+                    "        .control-panel h2 { margin-top: 0; color: #667eea; }\n" +
+                    "        .toggle-container { display: flex; align-items: center; margin-bottom: 20px; }\n" +
+                    "        .toggle-switch { position: relative; display: inline-block; width: 60px; height: 34px; margin-right: 15px; }\n" +
+                    "        .toggle-switch input { opacity: 0; width: 0; height: 0; }\n" +
+                    "        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }\n" +
+                    "        .toggle-slider:before { position: absolute; content: ''; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }\n" +
+                    "        input:checked + .toggle-slider { background-color: #667eea; }\n" +
+                    "        input:checked + .toggle-slider:before { transform: translateX(26px); }\n" +
+                    "        .command-section { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }\n" +
+                    "        .command-input { display: flex; gap: 10px; margin-bottom: 20px; }\n" +
+                    "        input[type='text'], input[type='password'] { flex: 1; padding: 12px 15px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; transition: border-color 0.3s; }\n" +
+                    "        input:focus { outline: none; border-color: #667eea; }\n" +
+                    "        button { padding: 12px 25px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; }\n" +
+                    "        button:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4); }\n" +
+                    "        button:active { transform: translateY(0); }\n" +
+                    "        .button-group { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }\n" +
+                    "        .command-list { margin-top: 20px; max-height: 300px; overflow-y: auto; }\n" +
+                    "        .command-item { display: flex; justify-content: space-between; align-items: center; padding: 15px; border-bottom: 1px solid #eee; background: #f9f9f9; border-radius: 8px; margin-bottom: 10px; }\n" +
+                    "        .command-item:last-child { border-bottom: none; }\n" +
+                    "        .auth-panel { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 30px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); color: white; }\n" +
+                    "        .auth-panel h3 { margin-top: 0; }\n" +
+                    "        .status-badge { display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 0.9em; font-weight: bold; margin-left: 10px; }\n" +
+                    "        .status-connected { background: #4CAF50; color: white; }\n" +
+                    "        .status-disconnected { background: #f44336; color: white; }\n" +
+                    "        .log-entry { background: #f5f5f5; padding: 10px 15px; border-radius: 5px; margin-bottom: 5px; font-family: monospace; font-size: 0.9em; }\n" +
+                    "        .error-message { background: #ffebee; color: #c62828; padding: 15px; border-radius: 8px; margin: 15px 0; }\n" +
+                    "        .success-message { background: #e8f5e9; color: #2e7d32; padding: 15px; border-radius: 8px; margin: 15px 0; }\n" +
                     "    </style>\n" +
                     "</head>\n" +
                     "<body>\n" +
                     "    <div class='container'>\n" +
                     "        <div class='header'>\n" +
                     "            <h1>NeoHide Dashboard</h1>\n" +
-                    "            <p>Управление защитой сервера</p>\n" +
+                    "            <p>Панель управления защитой Minecraft сервера</p>\n" +
+                    "            <div id='connectionStatus'>\n" +
+                    "                <span id='statusText'>Не подключено</span>\n" +
+                    "                <span id='statusBadge' class='status-badge status-disconnected'>Отключено</span>\n" +
+                    "            </div>\n" +
                     "        </div>\n" +
                     "        \n" +
                     "        <div class='auth-panel' id='authPanel'>\n" +
-                    "            <h3>Авторизация</h3>\n" +
-                    "            <p>Введите токен из config.yml:</p>\n" +
-                    "            <input type='password' id='authToken' placeholder='Auth token'>\n" +
-                    "            <button onclick='connect()'>Подключиться</button>\n" +
+                    "            <h3>🔐 Авторизация</h3>\n" +
+                    "            <p>Для доступа к панели управления введите токен из config.yml</p>\n" +
+                    "            <div class='command-input'>\n" +
+                    "                <input type='password' id='authToken' placeholder='Введите секретный токен'>\n" +
+                    "                <button onclick='connect()'>Подключиться</button>\n" +
+                    "            </div>\n" +
+                    "            <p><small>Токен можно найти в файле plugins/NeoHide/config.yml в разделе web.auth-token</small></p>\n" +
                     "        </div>\n" +
                     "        \n" +
                     "        <div id='dashboard' style='display:none;'>\n" +
-                    "            <div class='stats'>\n" +
+                    "            <div class='stats-grid'>\n" +
                     "                <div class='stat-card'>\n" +
-                    "                    <h3>Скрытые команды</h3>\n" +
-                    "                    <div class='value' id='hiddenCount'>0</div>\n" +
+                    "                    <h3>📋 Скрытые команды</h3>\n" +
+                    "                    <div class='stat-value' id='hiddenCount'>0</div>\n" +
+                    "                    <p>Команд скрыто от игроков</p>\n" +
                     "                </div>\n" +
                     "                <div class='stat-card'>\n" +
-                    "                    <h3>Онлайн игроки</h3>\n" +
-                    "                    <div class='value' id='onlineCount'>0</div>\n" +
+                    "                    <h3>👥 Онлайн игроки</h3>\n" +
+                    "                    <div class='stat-value' id='onlineCount'>0</div>\n" +
+                    "                    <p>Игроков на сервере</p>\n" +
                     "                </div>\n" +
                     "                <div class='stat-card'>\n" +
-                    "                    <h3>Ванш игроки</h3>\n" +
-                    "                    <div class='value' id='vanishedCount'>0</div>\n" +
+                    "                    <h3>👻 Игроки в ванше</h3>\n" +
+                    "                    <div class='stat-value' id='vanishedCount'>0</div>\n" +
+                    "                    <p>Скрытых администраторов</p>\n" +
+                    "                </div>\n" +
+                    "                <div class='stat-card'>\n" +
+                    "                    <h3>🛡️ Статус защиты</h3>\n" +
+                    "                    <div class='stat-value' id='protectionStatus'>Нет</div>\n" +
+                    "                    <p>Система защиты активна</p>\n" +
                     "                </div>\n" +
                     "            </div>\n" +
                     "            \n" +
                     "            <div class='control-panel'>\n" +
-                    "                <h3>Управление защитой</h3>\n" +
-                    "                <label>\n" +
-                    "                    <input type='checkbox' id='protectionToggle' onchange='toggleProtection()'>\n" +
-                    "                    Защита включена\n" +
-                    "                </label>\n" +
+                    "                <h2>⚙️ Управление защитой</h2>\n" +
                     "                \n" +
-                    "                <div class='command-input'>\n" +
-                    "                    <input type='text' id='commandInput' placeholder='Введите команду для скрытия'>\n" +
-                    "                    <button onclick='hideCommand()'>Скрыть команду</button>\n" +
+                    "                <div class='toggle-container'>\n" +
+                    "                    <label class='toggle-switch'>\n" +
+                    "                        <input type='checkbox' id='protectionToggle' onchange='toggleProtection()'>\n" +
+                    "                        <span class='toggle-slider'></span>\n" +
+                    "                    </label>\n" +
+                    "                    <label for='protectionToggle' style='font-size: 1.1em; font-weight: bold;'>Защита команд включена</label>\n" +
                     "                </div>\n" +
                     "                \n" +
-                    "                <button onclick='refreshData()' style='margin-right:10px;'>Обновить</button>\n" +
-                    "                <button onclick='reloadPlugin()'>Перезагрузить плагин</button>\n" +
+                    "                <div class='command-section'>\n" +
+                    "                    <h3>🎯 Управление командами</h3>\n" +
+                    "                    <div class='command-input'>\n" +
+                    "                        <input type='text' id='commandInput' placeholder='Введите команду для скрытия (например: plugin)'>\n" +
+                    "                        <button onclick='hideCommand()'>Скрыть команду</button>\n" +
+                    "                    </div>\n" +
+                    "                    \n" +
+                    "                    <div class='button-group'>\n" +
+                    "                        <button onclick='refreshData()'>🔄 Обновить данные</button>\n" +
+                    "                        <button onclick='showLogs()'>📜 Показать логи</button>\n" +
+                    "                        <button onclick='reloadConfig()'>⚡ Перезагрузить конфиг</button>\n" +
+                    "                    </div>\n" +
+                    "                </div>\n" +
                     "            </div>\n" +
                     "            \n" +
-                    "            <div class='command-list'>\n" +
-                    "                <h3>Скрытые команды</h3>\n" +
-                    "                <div id='commandsList'></div>\n" +
+                    "            <div class='command-section'>\n" +
+                    "                <h3>📋 Список скрытых команд</h3>\n" +
+                    "                <div class='command-list' id='commandsList'>\n" +
+                    "                    <p style='text-align: center; color: #888;'>Загрузка списка команд...</p>\n" +
+                    "                </div>\n" +
                     "            </div>\n" +
+                    "            \n" +
+                    "            <div id='logsSection' style='display:none;'>\n" +
+                    "                <div class='command-section'>\n" +
+                    "                    <h3>📜 Последние действия</h3>\n" +
+                    "                    <div id='logsList'></div>\n" +
+                    "                </div>\n" +
+                    "            </div>\n" +
+                    "            \n" +
+                    "            <div id='messages' style='margin-top: 20px;'></div>\n" +
                     "        </div>\n" +
                     "    </div>\n" +
                     "    \n" +
                     "    <script>\n" +
                     "        let authToken = '';\n" +
+                    "        let autoRefreshInterval = null;\n" +
                     "        \n" +
                     "        function connect() {\n" +
                     "            authToken = document.getElementById('authToken').value.trim();\n" +
                     "            if (!authToken) {\n" +
-                    "                alert('Введите токен авторизации');\n" +
+                    "                showMessage('Введите токен авторизации', 'error');\n" +
                     "                return;\n" +
                     "            }\n" +
                     "            \n" +
+                    "            // Сохраняем токен в localStorage\n" +
                     "            localStorage.setItem('neohide_token', authToken);\n" +
+                    "            \n" +
+                    "            // Скрываем панель авторизации, показываем dashboard\n" +
                     "            document.getElementById('authPanel').style.display = 'none';\n" +
                     "            document.getElementById('dashboard').style.display = 'block';\n" +
+                    "            \n" +
+                    "            // Обновляем статус\n" +
+                    "            updateStatus('Подключение...', 'disconnected');\n" +
+                    "            \n" +
+                    "            // Загружаем данные\n" +
                     "            refreshData();\n" +
+                    "            \n" +
+                    "            // Запускаем автообновление каждые 10 секунд\n" +
+                    "            if (autoRefreshInterval) {\n" +
+                    "                clearInterval(autoRefreshInterval);\n" +
+                    "            }\n" +
+                    "            autoRefreshInterval = setInterval(refreshData, 10000);\n" +
+                    "        }\n" +
+                    "        \n" +
+                    "        function updateStatus(text, type) {\n" +
+                    "            const statusText = document.getElementById('statusText');\n" +
+                    "            const statusBadge = document.getElementById('statusBadge');\n" +
+                    "            \n" +
+                    "            statusText.textContent = text;\n" +
+                    "            statusBadge.textContent = type === 'connected' ? 'Подключено' : 'Отключено';\n" +
+                    "            statusBadge.className = 'status-badge ' + (type === 'connected' ? 'status-connected' : 'status-disconnected');\n" +
+                    "        }\n" +
+                    "        \n" +
+                    "        function showMessage(message, type) {\n" +
+                    "            const messagesDiv = document.getElementById('messages');\n" +
+                    "            const messageDiv = document.createElement('div');\n" +
+                    "            messageDiv.className = type === 'error' ? 'error-message' : 'success-message';\n" +
+                    "            messageDiv.textContent = message;\n" +
+                    "            \n" +
+                    "            messagesDiv.appendChild(messageDiv);\n" +
+                    "            \n" +
+                    "            // Автоматически удаляем сообщение через 5 секунд\n" +
+                    "            setTimeout(() => {\n" +
+                    "                if (messageDiv.parentNode) {\n" +
+                    "                    messageDiv.remove();\n" +
+                    "                }\n" +
+                    "            }, 5000);\n" +
                     "        }\n" +
                     "        \n" +
                     "        async function apiCall(endpoint, method = 'GET', params = {}) {\n" +
-                    "            const url = '/api' + endpoint + (method === 'GET' && Object.keys(params).length > 0 \n" +
-                    "                ? '?' + new URLSearchParams(params).toString() : '');\n" +
-                    "            \n" +
-                    "            const response = await fetch(url, {\n" +
+                    "            const url = '/api' + endpoint;\n" +
+                    "            let options = {\n" +
                     "                method: method,\n" +
                     "                headers: {\n" +
-                    "                    'X-Auth-Token': authToken\n" +
-                    "                },\n" +
-                    "                body: method === 'POST' ? new URLSearchParams(params) : null\n" +
-                    "            });\n" +
+                    "                    'X-Auth-Token': authToken,\n" +
+                    "                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'\n" +
+                    "                }\n" +
+                    "            };\n" +
                     "            \n" +
-                    "            if (response.status === 401) {\n" +
-                    "                alert('Неверный токен авторизации');\n" +
-                    "                location.reload();\n" +
-                    "                return null;\n" +
+                    "            if (method === 'POST' && Object.keys(params).length > 0) {\n" +
+                    "                const formData = new URLSearchParams();\n" +
+                    "                for (const [key, value] of Object.entries(params)) {\n" +
+                    "                    formData.append(key, value);\n" +
+                    "                }\n" +
+                    "                options.body = formData;\n" +
+                    "            } else if (method === 'GET' && Object.keys(params).length > 0) {\n" +
+                    "                const query = new URLSearchParams(params).toString();\n" +
+                    "                options.url = url + '?' + query;\n" +
                     "            }\n" +
                     "            \n" +
-                    "            return await response.json();\n" +
+                    "            try {\n" +
+                    "                const response = await fetch(url, options);\n" +
+                    "                \n" +
+                    "                if (response.status === 401) {\n" +
+                    "                    updateStatus('Неверный токен', 'disconnected');\n" +
+                    "                    showMessage('Неверный токен авторизации. Проверьте config.yml', 'error');\n" +
+                    "                    return null;\n" +
+                    "                }\n" +
+                    "                \n" +
+                    "                if (!response.ok) {\n" +
+                    "                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);\n" +
+                    "                }\n" +
+                    "                \n" +
+                    "                const data = await response.json();\n" +
+                    "                updateStatus('Подключено', 'connected');\n" +
+                    "                return data;\n" +
+                    "                \n" +
+                    "            } catch (error) {\n" +
+                    "                console.error('Ошибка API:', error);\n" +
+                    "                updateStatus('Ошибка подключения', 'disconnected');\n" +
+                    "                showMessage('Ошибка подключения к серверу: ' + error.message, 'error');\n" +
+                    "                return null;\n" +
+                    "            }\n" +
                     "        }\n" +
                     "        \n" +
                     "        async function refreshData() {\n" +
@@ -390,7 +536,10 @@ public class WebServerManager {
                     "                const status = await apiCall('/status');\n" +
                     "                if (!status) return;\n" +
                     "                \n" +
+                    "                // Обновляем переключатель защиты\n" +
                     "                document.getElementById('protectionToggle').checked = status.protection_enabled;\n" +
+                    "                document.getElementById('protectionStatus').textContent = status.protection_enabled ? 'Активна' : 'Отключена';\n" +
+                    "                document.getElementById('protectionStatus').style.color = status.protection_enabled ? '#4CAF50' : '#f44336';\n" +
                     "                \n" +
                     "                // Получаем статистику\n" +
                     "                const stats = await apiCall('/stats');\n" +
@@ -407,82 +556,155 @@ public class WebServerManager {
                     "                const commandsList = document.getElementById('commandsList');\n" +
                     "                commandsList.innerHTML = '';\n" +
                     "                \n" +
-                    "                commands.forEach(cmd => {\n" +
-                    "                    const item = document.createElement('div');\n" +
-                    "                    item.className = 'command-item';\n" +
-                    "                    item.innerHTML = `\n" +
-                    "                        <span>/${cmd}</span>\n" +
-                    "                        <button onclick='unhideCommand(\"${cmd}\")'>Показать</button>\n" +
-                    "                    `;\n" +
-                    "                    commandsList.appendChild(item);\n" +
-                    "                });\n" +
+                    "                if (commands.length === 0) {\n" +
+                    "                    commandsList.innerHTML = '<p style=\"text-align: center; color: #888;\">Нет скрытых команд</p>';\n" +
+                    "                } else {\n" +
+                    "                    commands.forEach(cmd => {\n" +
+                    "                        const item = document.createElement('div');\n" +
+                    "                        item.className = 'command-item';\n" +
+                    "                        item.innerHTML = `\n" +
+                    "                            <div>\n" +
+                    "                                <strong style=\"color: #667eea;\">/${cmd}</strong>\n" +
+                    "                            </div>\n" +
+                    "                            <button onclick=\"unhideCommand('${cmd}')\">Показать команду</button>\n" +
+                    "                        `;\n" +
+                    "                        commandsList.appendChild(item);\n" +
+                    "                    });\n" +
+                    "                }\n" +
+                    "                \n" +
+                    "                showMessage('Данные успешно обновлены', 'success');\n" +
                     "                \n" +
                     "            } catch (error) {\n" +
-                    "                console.error('Ошибка:', error);\n" +
-                    "                alert('Ошибка загрузки данных');\n" +
+                    "                console.error('Ошибка обновления данных:', error);\n" +
+                    "                showMessage('Ошибка при обновлении данных', 'error');\n" +
                     "            }\n" +
                     "        }\n" +
                     "        \n" +
                     "        async function hideCommand() {\n" +
                     "            const command = document.getElementById('commandInput').value.trim();\n" +
                     "            if (!command) {\n" +
-                    "                alert('Введите команду');\n" +
+                    "                showMessage('Введите команду для скрытия', 'error');\n" +
                     "                return;\n" +
                     "            }\n" +
                     "            \n" +
-                    "            const result = await apiCall('/hide', 'POST', { command });\n" +
+                    "            // Убираем слеш если есть\n" +
+                    "            const cleanCommand = command.replace(/^\\//, '');\n" +
+                    "            \n" +
+                    "            const result = await apiCall('/hide', 'POST', { command: cleanCommand });\n" +
                     "            if (result && result.success) {\n" +
                     "                document.getElementById('commandInput').value = '';\n" +
+                    "                showMessage(result.message, 'success');\n" +
                     "                refreshData();\n" +
                     "            }\n" +
                     "        }\n" +
                     "        \n" +
                     "        async function unhideCommand(command) {\n" +
-                    "            if (!confirm(`Показать команду /${command}?`)) return;\n" +
+                    "            if (!confirm(`Вы действительно хотите показать команду /${command}?`)) return;\n" +
                     "            \n" +
-                    "            const result = await apiCall('/unhide', 'POST', { command });\n" +
+                    "            const result = await apiCall('/unhide', 'POST', { command: command });\n" +
                     "            if (result && result.success) {\n" +
+                    "                showMessage(result.message, 'success');\n" +
                     "                refreshData();\n" +
                     "            }\n" +
                     "        }\n" +
                     "        \n" +
                     "        async function toggleProtection() {\n" +
                     "            const enabled = document.getElementById('protectionToggle').checked;\n" +
-                    "            await apiCall('/toggle', 'POST', { enabled: enabled });\n" +
+                    "            const result = await apiCall('/toggle', 'POST', { enabled: enabled });\n" +
+                    "            if (result && result.success) {\n" +
+                    "                showMessage(result.message, 'success');\n" +
+                    "                refreshData();\n" +
+                    "            } else {\n" +
+                    "                // Откатываем переключатель если ошибка\n" +
+                    "                document.getElementById('protectionToggle').checked = !enabled;\n" +
+                    "            }\n" +
                     "        }\n" +
                     "        \n" +
-                    "        async function reloadPlugin() {\n" +
-                    "            if (!confirm('Перезагрузить конфигурацию плагина?')) return;\n" +
-                    "            alert('Для перезагрузки используйте команду /neohide reload в игре');\n" +
+                    "        async function showLogs() {\n" +
+                    "            const logsSection = document.getElementById('logsSection');\n" +
+                    "            const logsList = document.getElementById('logsList');\n" +
+                    "            \n" +
+                    "            if (logsSection.style.display === 'none') {\n" +
+                    "                logsList.innerHTML = '<p style=\"text-align: center; color: #888;\">Загрузка логов...</p>';\n" +
+                    "                logsSection.style.display = 'block';\n" +
+                    "                \n" +
+                    "                // Здесь можно добавить загрузку логов когда будет API\n" +
+                    "                setTimeout(() => {\n" +
+                    "                    logsList.innerHTML = '<p style=\"text-align: center; color: #888;\">Функция логов в разработке</p>';\n" +
+                    "                }, 1000);\n" +
+                    "            } else {\n" +
+                    "                logsSection.style.display = 'none';\n" +
+                    "            }\n" +
                     "        }\n" +
                     "        \n" +
-                    "        // Проверяем сохраненный токен\n" +
+                    "        async function reloadConfig() {\n" +
+                    "            if (!confirm('Перезагрузить конфигурацию плагина?\\nИспользуйте команду /neohide reload в игре')) return;\n" +
+                    "            showMessage('Для перезагрузки используйте /neohide reload в игре', 'error');\n" +
+                    "        }\n" +
+                    "        \n" +
+                    "        function disconnect() {\n" +
+                    "            if (autoRefreshInterval) {\n" +
+                    "                clearInterval(autoRefreshInterval);\n" +
+                    "                autoRefreshInterval = null;\n" +
+                    "            }\n" +
+                    "            \n" +
+                    "            localStorage.removeItem('neohide_token');\n" +
+                    "            document.getElementById('dashboard').style.display = 'none';\n" +
+                    "            document.getElementById('authPanel').style.display = 'block';\n" +
+                    "            document.getElementById('authToken').value = '';\n" +
+                    "            updateStatus('Не подключено', 'disconnected');\n" +
+                    "        }\n" +
+                    "        \n" +
+                    "        // Проверяем сохраненный токен при загрузке\n" +
                     "        window.onload = function() {\n" +
                     "            const savedToken = localStorage.getItem('neohide_token');\n" +
                     "            if (savedToken) {\n" +
                     "                document.getElementById('authToken').value = savedToken;\n" +
                     "                connect();\n" +
                     "            }\n" +
+                    "            \n" +
+                    "            // Добавляем кнопку отключения\n" +
+                    "            const header = document.querySelector('.header');\n" +
+                    "            const disconnectBtn = document.createElement('button');\n" +
+                    "            disconnectBtn.textContent = 'Выйти';\n" +
+                    "            disconnectBtn.style.marginLeft = '20px';\n" +
+                    "            disconnectBtn.style.background = 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)';\n" +
+                    "            disconnectBtn.onclick = disconnect;\n" +
+                    "            header.appendChild(disconnectBtn);\n" +
                     "        };\n" +
                     "    </script>\n" +
                     "</body>\n" +
                     "</html>";
 
+            byte[] responseBytes = html.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
-            exchange.sendResponseHeaders(200, html.getBytes().length);
+            exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+            exchange.sendResponseHeaders(200, responseBytes.length);
 
-            try (PrintWriter out = new PrintWriter(exchange.getResponseBody())) {
-                out.print(html);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(responseBytes);
+            }
+        }
+
+        private void serveCss(com.sun.net.httpserver.HttpExchange exchange) throws IOException {
+            String css = "body { font-family: Arial, sans-serif; }";
+            byte[] responseBytes = css.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/css; charset=UTF-8");
+            exchange.sendResponseHeaders(200, responseBytes.length);
+
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(responseBytes);
             }
         }
 
         private void sendError(com.sun.net.httpserver.HttpExchange exchange, int code, String message) throws IOException {
-            String response = "<html><body><h1>" + code + " " + message + "</h1></body></html>";
+            String response = "<html><head><meta charset='UTF-8'></head><body><h1>" + code + " " + message + "</h1></body></html>";
+            byte[] responseBytes = response.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
-            exchange.sendResponseHeaders(code, response.getBytes().length);
+            exchange.sendResponseHeaders(code, responseBytes.length);
 
-            try (PrintWriter out = new PrintWriter(exchange.getResponseBody())) {
-                out.print(response);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(responseBytes);
             }
         }
     }
