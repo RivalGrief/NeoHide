@@ -1,0 +1,50 @@
+# NeoHide - Конфигурация скрытия команд и защиты прав
+
+hide-commands:
+  enabled: true
+  hide-from-tab: true
+  hide-op-commands: true
+
+permission-protection:
+  enabled: true
+  protect-op: true
+  auto-fix: true
+
+logging:
+  console: true
+  file: true
+
+# Список команд для скрытия
+hidden-commands:
+  - "plugin"
+  - "pl"
+  - "plugins"
+  - "ver"
+  - "version"
+  - "bukkit"
+  - "spigot"
+  - "minecraft:help"
+  - "help"
+  - "?"
+  - "op"
+  - "deop"
+  - "pex"
+  - "luckperms"
+  - "perm"
+  - "permission"
+  - "permissionsex"
+
+# Защищенные права (нельзя получить даже через плагины прав)
+protected-permissions:
+  - "*"
+  - "bukkit.*"
+  - "minecraft.*"
+  - "neohide.reload"
+  - "neohide.manage"
+
+# Фейковые ответы на скрытые команды
+fake-aliases:
+  plugin: "§cНеизвестная команда. Напишите /help для помощи."
+  pl: "§cНеизвестная команда. Напишите /help для помощи."
+  op: "§cУ вас недостаточно прав для выполнения этой команды."
+  deop: "§cУ вас недостаточно прав для выполнения этой команды."

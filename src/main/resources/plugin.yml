@@ -1,0 +1,34 @@
+name: NeoHide
+version: 1.0.0
+main: com.neohide.neohide.NeoHide
+api-version: "1.16"
+authors: NeoStudio
+description: Advanced command hiding and permission protection
+website: https://github.com/yourname/NeoHide
+
+commands:
+  neohide:
+    description: Main command for NeoHide
+    usage: /<command> [help|reload|status|hide|unhide|list|protect]
+    permission: neohide.use
+    aliases: [nh, hide]
+
+permissions:
+  neohide.use:
+    description: Allows using NeoHide commands
+    default: op
+  neohide.reload:
+    description: Allows reloading configuration
+    default: op
+  neohide.manage:
+    description: Allows managing hidden commands and permissions
+    default: op
+  neohide.view:
+    description: Allows viewing hidden commands
+    default: op
+  neohide.alerts:
+    description: Receive security alerts
+    default: op
+  neohide.bypass:
+    description: Bypass command hiding
+    default: op
